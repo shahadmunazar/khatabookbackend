@@ -11,6 +11,7 @@ import { JwtService } from '@nestjs/jwt';
 import { Op } from 'sequelize';
 import * as nodemailer from 'nodemailer';
 import { ConfigService } from '@nestjs/config';
+import { Role } from '../models/role.model';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -21,11 +22,13 @@ export class AuthService {
   constructor(
     @InjectModel(User)
     private userModel: typeof User,
+    @InjectModel(Role)
+    private roleModel: typeof Role,
     private jwtService: JwtService,
     private configService: ConfigService,
   ) {
     this.baseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
-    
+
     this.transporter = nodemailer.createTransport({
       host: this.configService.get<string>('MAIL_HOST'),
       port: this.configService.get<number>('MAIL_PORT'),
@@ -44,11 +47,9 @@ export class AuthService {
   private generateToken(): string {
     return crypto.randomBytes(32).toString('hex');
   }
-
   private async sendMail(to: string, subject: string, text: string, html?: string) {
     const fromAddress = this.configService.get<string>('MAIL_FROM_ADDRESS');
     const fromName = this.configService.get<string>('MAIL_FROM_NAME');
-
     try {
       await this.transporter.sendMail({
         from: `"${fromName}" <${fromAddress}>`,
@@ -65,7 +66,7 @@ export class AuthService {
 
   async login(loginDto: LoginDto) {
     const { email, phone, mobile_no, password } = loginDto;
-    
+
     const identifier = email || phone || mobile_no;
 
     if (!identifier) {
@@ -73,13 +74,13 @@ export class AuthService {
     }
 
     // Support login with either email or phone
-    const user = await this.userModel.findOne({ 
-      where: { 
+    const user = await this.userModel.findOne({
+      where: {
         [Op.or]: [
           { email: identifier },
           { phone: identifier }
         ]
-      } 
+      }
     });
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
@@ -152,14 +153,20 @@ export class AuthService {
         isVerified: autoVerify,
       });
 
+      // Assign Role
+      const role = await this.roleModel.findOne({ where: { name: user_type } });
+      if (role) {
+        await user.$set('roles', [role.id]);
+      }
+
       if (!autoVerify) {
         const verifyLink = `${this.baseUrl}/auth/verify?token=${verificationToken}`;
-        await this.sendMail(
-          email, 
-          'Verify your email', 
-          `Your verification OTP is: ${otp}. Or click here: ${verifyLink}`,
-          `<p>Your verification OTP is: <b>${otp}</b></p><p>Or click <a href="${verifyLink}">here</a> to verify.</p>`
-        );
+        const emailHtml = `
+          <p>Hello ${name},</p>
+          <p>Please verify your email using OTP: <b>${otp}</b></p>
+          <p>Or click this link: <a href="${verifyLink}">${verifyLink}</a></p>
+        `;
+        await this.sendMail(email, 'Verify your email', `Your OTP is ${otp}`, emailHtml);
       }
 
       const userResponse = user.toJSON();

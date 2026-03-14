@@ -49,7 +49,7 @@ export class User extends Model {
 
   @Column({
     field: 'user_type',
-    type: DataType.ENUM('individual', 'company'),
+    type: DataType.ENUM('individual', 'company', 'admin'),
     allowNull: false,
     defaultValue: 'individual',
   })

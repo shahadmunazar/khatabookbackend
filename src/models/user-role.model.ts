@@ -28,7 +28,7 @@ export class UserRole extends Model {
     type: DataType.INTEGER,
     allowNull: false,
   })
-  declare role_id: number;
+  declare roleId: number;
 
   @CreatedAt
   @Column({

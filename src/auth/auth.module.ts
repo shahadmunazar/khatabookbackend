@@ -6,11 +6,13 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { User } from '../models/user.model';
+import { Role } from '../models/role.model';
+import { UserRole } from '../models/user-role.model';
 import { JwtStrategy } from './strategies/jwt.strategy';
 
 @Module({
   imports: [
-    SequelizeModule.forFeature([User]),
+    SequelizeModule.forFeature([User, Role, UserRole]),
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
