@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
@@ -9,16 +10,23 @@ import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
-    SequelizeModule.forRoot({
-      dialect: 'mysql',
-      host: 'localhost',
-      port: 3306,
-      username: 'root',
-      password: '',
-      database: 'khatabookbackend',
-      models: [Role, User, UserRole],
-      autoLoadModels: true,
-      synchronize: false,
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    SequelizeModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        dialect: 'mysql',
+        host: configService.get<string>('DB_HOST'),
+        port: configService.get<number>('DB_PORT'),
+        username: configService.get<string>('DB_USER'),
+        password: configService.get<string>('DB_PASS'),
+        database: configService.get<string>('DB_NAME'),
+        models: [Role, User, UserRole],
+        autoLoadModels: true,
+        synchronize: false,
+      }),
+      inject: [ConfigService],
     }),
     AuthModule,
   ],

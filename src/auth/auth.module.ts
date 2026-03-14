@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { SequelizeModule } from '@nestjs/sequelize';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
 import { User } from '../models/user.model';
@@ -11,9 +12,15 @@ import { JwtStrategy } from './strategies/jwt.strategy';
   imports: [
     SequelizeModule.forFeature([User]),
     PassportModule,
-    JwtModule.register({
-      secret: 'secretKey', // In production, use environment variables
-      signOptions: { expiresIn: '1d' },
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: { 
+          expiresIn: configService.get<string>('JWT_EXPIRES_IN') as any,
+        },
+      }),
+      inject: [ConfigService],
     }),
   ],
   controllers: [AuthController],

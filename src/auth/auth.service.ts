@@ -9,25 +9,29 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { Op } from 'sequelize';
 import * as nodemailer from 'nodemailer';
+import { ConfigService } from '@nestjs/config';
 import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
   private transporter: nodemailer.Transporter;
-  private readonly baseUrl = 'http://localhost:3000'; // Replace with real URL in production
+  private readonly baseUrl: string;
 
   constructor(
     @InjectModel(User)
     private userModel: typeof User,
     private jwtService: JwtService,
+    private configService: ConfigService,
   ) {
-    // Basic nodemailer setup (using ethereal for testing or just logging as fallback)
+    this.baseUrl = this.configService.get<string>('BASE_URL') || 'http://localhost:3000';
+    
     this.transporter = nodemailer.createTransport({
-      host: 'smtp.ethereal.email',
-      port: 587,
+      host: this.configService.get<string>('MAIL_HOST'),
+      port: this.configService.get<number>('MAIL_PORT'),
+      secure: this.configService.get<number>('MAIL_PORT') === 465, // true for 465, false for other ports
       auth: {
-        user: 'ethereal_user', // Replace with real credentials or env vars
-        pass: 'ethereal_pass',
+        user: this.configService.get<string>('MAIL_USERNAME'),
+        pass: this.configService.get<string>('MAIL_PASSWORD'),
       },
     });
   }
@@ -41,14 +45,21 @@ export class AuthService {
   }
 
   private async sendMail(to: string, subject: string, text: string, html?: string) {
-    // In real scenario, you'd use real SMTP. For dev, we log it.
-    console.log(`[MAIL] To: ${to}, Subject: ${subject}, Body: ${text}`);
-    if (html) console.log(`[MAIL HTML] ${html}`);
-    // try {
-    //   await this.transporter.sendMail({ from: '"Khatabook" <noreply@khatabook.com>', to, subject, text, html });
-    // } catch (e) {
-    //   console.error('Mail send failed', e);
-    // }
+    const fromAddress = this.configService.get<string>('MAIL_FROM_ADDRESS');
+    const fromName = this.configService.get<string>('MAIL_FROM_NAME');
+
+    try {
+      await this.transporter.sendMail({
+        from: `"${fromName}" <${fromAddress}>`,
+        to,
+        subject,
+        text,
+        html,
+      });
+      console.log(`[MAIL SENT] To: ${to}, Subject: ${subject}`);
+    } catch (e) {
+      console.error('Mail send failed', e);
+    }
   }
 
   async login(loginDto: LoginDto) {
