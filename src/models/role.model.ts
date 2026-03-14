@@ -21,7 +21,7 @@ export class Role extends Model {
     type: DataType.STRING(50),
     unique: true,
   })
-  name: string;
+  declare name: string;
 
   @CreatedAt
   @Column({

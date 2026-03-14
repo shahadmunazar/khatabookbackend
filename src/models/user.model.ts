@@ -21,24 +21,31 @@ export class User extends Model {
   @Column({
     type: DataType.STRING(255),
   })
-  name: string;
+  declare name: string;
+
+  @Column({
+    field: 'profile_image',
+    type: DataType.STRING(255),
+    allowNull: true,
+  })
+  declare profileImage: string | null;
 
   @Column({
     type: DataType.STRING(255),
     unique: true,
   })
-  email: string;
+  declare email: string;
 
   @Column({
     type: DataType.STRING(20),
     unique: true,
   })
-  phone: string;
+  declare phone: string;
 
   @Column({
     type: DataType.STRING(255),
   })
-  password: string;
+  declare password: string;
 
   @Column({
     field: 'user_type',

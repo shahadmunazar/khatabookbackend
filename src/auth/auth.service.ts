@@ -5,6 +5,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { LoginOtpDto } from './dto/login-otp.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { Op } from 'sequelize';
@@ -63,14 +64,20 @@ export class AuthService {
   }
 
   async login(loginDto: LoginDto) {
-    const { email, password } = loginDto;
+    const { email, phone, mobile_no, password } = loginDto;
     
+    const identifier = email || phone || mobile_no;
+
+    if (!identifier) {
+      throw new BadRequestException('Please provide email or phone number');
+    }
+
     // Support login with either email or phone
     const user = await this.userModel.findOne({ 
       where: { 
         [Op.or]: [
-          { email: email },
-          { phone: email } // In LoginDto, 'email' field acts as identifier
+          { email: identifier },
+          { phone: identifier }
         ]
       } 
     });
@@ -228,5 +235,39 @@ export class AuthService {
     if (!user.isVerified) user.isVerified = true;
     await user.save();
     return this.generateTokenResponse(user);
+  }
+
+  async updateProfileImage(user: User, fileName: string) {
+    user.profileImage = fileName;
+    await user.save();
+    return {
+      message: 'Profile image updated successfully',
+      profile_image: fileName,
+      url: `${this.baseUrl}/uploads/${fileName}`
+    };
+  }
+
+  async updateProfile(user: User, updateDto: UpdateProfileDto) {
+    const { name, phone } = updateDto;
+
+    if (phone && phone !== user.phone) {
+      const existing = await this.userModel.findOne({ where: { phone } });
+      if (existing) throw new ConflictException('Phone number already in use');
+      user.phone = phone;
+    }
+
+    if (name) user.name = name;
+
+    await user.save();
+
+    const userResponse = user.toJSON();
+    delete userResponse.password;
+    delete userResponse.otp;
+    delete userResponse.verificationToken;
+
+    return {
+      message: 'Profile updated successfully',
+      user: userResponse
+    };
   }
 }
