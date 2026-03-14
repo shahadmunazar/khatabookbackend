@@ -1,27 +1,81 @@
-import { Injectable, ConflictException, InternalServerErrorException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Injectable, ConflictException, InternalServerErrorException, UnauthorizedException, ForbiddenException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/sequelize';
 import { User } from '../models/user.model';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { VerifyEmailDto } from './dto/verify-email.dto';
+import { LoginOtpDto } from './dto/login-otp.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
+import { Op } from 'sequelize';
+import * as nodemailer from 'nodemailer';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
+  private transporter: nodemailer.Transporter;
+  private readonly baseUrl = 'http://localhost:3000'; // Replace with real URL in production
+
   constructor(
     @InjectModel(User)
     private userModel: typeof User,
     private jwtService: JwtService,
-  ) {}
+  ) {
+    // Basic nodemailer setup (using ethereal for testing or just logging as fallback)
+    this.transporter = nodemailer.createTransport({
+      host: 'smtp.ethereal.email',
+      port: 587,
+      auth: {
+        user: 'ethereal_user', // Replace with real credentials or env vars
+        pass: 'ethereal_pass',
+      },
+    });
+  }
+
+  private generateOtp(): string {
+    return Math.floor(100000 + Math.random() * 900000).toString();
+  }
+
+  private generateToken(): string {
+    return crypto.randomBytes(32).toString('hex');
+  }
+
+  private async sendMail(to: string, subject: string, text: string, html?: string) {
+    // In real scenario, you'd use real SMTP. For dev, we log it.
+    console.log(`[MAIL] To: ${to}, Subject: ${subject}, Body: ${text}`);
+    if (html) console.log(`[MAIL HTML] ${html}`);
+    // try {
+    //   await this.transporter.sendMail({ from: '"Khatabook" <noreply@khatabook.com>', to, subject, text, html });
+    // } catch (e) {
+    //   console.error('Mail send failed', e);
+    // }
+  }
 
   async login(loginDto: LoginDto) {
     const { email, password } = loginDto;
-    const user = await this.userModel.findOne({ where: { email } });
+    
+    // Support login with either email or phone
+    const user = await this.userModel.findOne({ 
+      where: { 
+        [Op.or]: [
+          { email: email },
+          { phone: email } // In LoginDto, 'email' field acts as identifier
+        ]
+      } 
+    });
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
+    if (!user.isVerified) {
+      throw new UnauthorizedException('Please verify your email first');
+    }
+
+    return this.generateTokenResponse(user);
+  }
+
+  async generateTokenResponse(user: User) {
     const payload = { sub: user.id, email: user.email, type: user.userType };
     return {
       access_token: this.jwtService.sign(payload),
@@ -29,7 +83,9 @@ export class AuthService {
         id: user.id,
         name: user.name,
         email: user.email,
+        phone: user.phone,
         user_type: user.userType,
+        is_verified: user.isVerified,
       },
     };
   }
@@ -38,48 +94,33 @@ export class AuthService {
     if (parentCompany.userType !== 'company') {
       throw new ForbiddenException('Only companies can create drivers');
     }
-
-    // Drivers are usually individuals
     driverDto.user_type = 'individual';
     driverDto.company_id = parentCompany.id;
-
-    return this.register(driverDto);
+    return this.register(driverDto, true); // Auto-verify drivers or not? Let's say false for security.
   }
 
-  async register(registerDto: RegisterDto) {
+  async register(registerDto: RegisterDto, autoVerify = false) {
     const { name, email, phone, password, user_type, company_id } = registerDto;
 
-    // Check if user already exists
-    const existingUser = await this.userModel.findOne({
-      where: { email },
-    });
+    const existingUser = await this.userModel.findOne({ where: { email } });
+    if (existingUser) throw new ConflictException('User with this email already exists');
 
-    if (existingUser) {
-      throw new ConflictException('User with this email already exists');
-    }
+    const existingPhone = await this.userModel.findOne({ where: { phone } });
+    if (existingPhone) throw new ConflictException('User with this phone number already exists');
 
-    const existingPhone = await this.userModel.findOne({
-      where: { phone },
-    });
-
-    if (existingPhone) {
-      throw new ConflictException('User with this phone number already exists');
-    }
-
-    // If company_id is provided, check if the company exists and is indeed a company
     if (company_id) {
       const company = await this.userModel.findByPk(company_id);
-      if (!company) {
-        throw new ConflictException('The specified company does not exist');
-      }
-      if (company.userType !== 'company') {
-        throw new ConflictException('The specified parent ID must belong to a "company" type user');
+      if (!company || company.userType !== 'company') {
+        throw new ConflictException('Invalid company mapping');
       }
     }
+
+    const otp = this.generateOtp();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000); // 10 mins
+    const verificationToken = this.generateToken();
 
     try {
       const hashedPassword = await bcrypt.hash(password, 10);
-
       const user = await this.userModel.create({
         name,
         email,
@@ -87,18 +128,94 @@ export class AuthService {
         password: hashedPassword,
         userType: user_type,
         companyId: company_id,
+        otp: autoVerify ? null : otp,
+        otpExpiry: autoVerify ? null : otpExpiry,
+        verificationToken: autoVerify ? null : verificationToken,
+        isVerified: autoVerify,
       });
 
-      // Remove password from response
+      if (!autoVerify) {
+        const verifyLink = `${this.baseUrl}/auth/verify?token=${verificationToken}`;
+        await this.sendMail(
+          email, 
+          'Verify your email', 
+          `Your verification OTP is: ${otp}. Or click here: ${verifyLink}`,
+          `<p>Your verification OTP is: <b>${otp}</b></p><p>Or click <a href="${verifyLink}">here</a> to verify.</p>`
+        );
+      }
+
       const userResponse = user.toJSON();
       delete userResponse.password;
+      delete userResponse.otp;
+      delete userResponse.verificationToken;
 
       return {
-        message: 'User registered successfully',
+        message: 'Registration successful. Please check your email for verification link or OTP.',
         user: userResponse,
       };
     } catch (error) {
       throw new InternalServerErrorException('Error registering user');
     }
+  }
+
+  async verifyEmail(verifyDto: VerifyEmailDto) {
+    const { email, otp } = verifyDto;
+    const user = await this.userModel.findOne({ where: { email, otp } });
+
+    if (!user || !user.otpExpiry || user.otpExpiry < new Date()) {
+      throw new BadRequestException('Invalid or expired OTP');
+    }
+
+    user.isVerified = true;
+    user.otp = null;
+    user.otpExpiry = null;
+    user.verificationToken = null;
+    await user.save();
+
+    return { message: 'Email verified successfully. You can now login.' };
+  }
+
+  async verifyByToken(token: string) {
+    const user = await this.userModel.findOne({ where: { verificationToken: token } });
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired verification link');
+    }
+
+    user.isVerified = true;
+    user.otp = null;
+    user.otpExpiry = null;
+    user.verificationToken = null;
+    await user.save();
+
+    return { message: 'Email verified successfully. You can now login.' };
+  }
+
+  async sendLoginOtp(email: string) {
+    const user = await this.userModel.findOne({ where: { email } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const otp = this.generateOtp();
+    user.otp = otp;
+    user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    await user.save();
+
+    await this.sendMail(email, 'Login OTP', `Your login OTP is: ${otp}`);
+    return { message: 'Login OTP sent to your email' };
+  }
+
+  async loginWithOtp(loginOtpDto: LoginOtpDto) {
+    const { email, otp } = loginOtpDto;
+    const user = await this.userModel.findOne({ where: { email, otp } });
+
+    if (!user || !user.otpExpiry || user.otpExpiry < new Date()) {
+      throw new UnauthorizedException('Invalid or expired OTP');
+    }
+
+    user.otp = null;
+    user.otpExpiry = null;
+    if (!user.isVerified) user.isVerified = true;
+    await user.save();
+    return this.generateTokenResponse(user);
   }
 }

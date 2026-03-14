@@ -62,6 +62,34 @@ export class User extends Model {
   @HasMany(() => User, 'company_id')
   declare employees: User[];
 
+  @Column({
+    field: 'is_verified',
+    type: DataType.BOOLEAN,
+    allowNull: false,
+    defaultValue: false,
+  })
+  declare isVerified: boolean;
+
+  @Column({
+    type: DataType.STRING(10),
+    allowNull: true,
+  })
+  declare otp: string | null;
+
+  @Column({
+    field: 'otp_expiry',
+    type: DataType.DATE,
+    allowNull: true,
+  })
+  declare otpExpiry: Date | null;
+
+  @Column({
+    field: 'verification_token',
+    type: DataType.STRING(255),
+    allowNull: true,
+  })
+  declare verificationToken: string | null;
+
   @CreatedAt
   @Column({
     field: 'created_at',
