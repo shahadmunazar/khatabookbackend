@@ -78,6 +78,13 @@ export class User extends Model {
   declare isVerified: boolean;
 
   @Column({
+    type: DataType.ENUM('active', 'disabled'),
+    allowNull: false,
+    defaultValue: 'active',
+  })
+  declare status: 'active' | 'disabled';
+
+  @Column({
     type: DataType.STRING(10),
     allowNull: true,
   })

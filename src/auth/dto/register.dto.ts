@@ -11,6 +11,11 @@ export class RegisterDto {
   @IsNotEmpty()
   @MinLength(6)
   password: string;
+
+  @IsOptional()
+  @IsString()
+  profile_image?: string;
+
   @IsEnum(['individual', 'company'], {
     message: 'user_type must be either individual or company',
   })
@@ -18,4 +23,5 @@ export class RegisterDto {
   @IsOptional()
   @IsNumber()
   company_id?: number;
+
 }

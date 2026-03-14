@@ -1,4 +1,4 @@
-import { Controller, Post, Body, UseGuards, Get, Query, UseInterceptors, UploadedFile } from '@nestjs/common';
+import { Controller, Post, Body, UseGuards, Get, Query, UseInterceptors, UploadedFile, Param, ForbiddenException } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
@@ -8,6 +8,8 @@ import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { LoginOtpDto } from './dto/login-otp.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CreateDriverDto } from './dto/create-driver.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { GetUser } from '../common/decorators/get-user.decorator';
 import { User } from '../models/user.model';
@@ -94,10 +96,78 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('create-driver')
+  @UseInterceptors(FileInterceptor('image', {
+    storage: diskStorage({
+      destination: './uploads',
+      filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
+      },
+    }),
+  }))
   async createDriver(
     @GetUser() user: User,
-    @Body() driverDto: RegisterDto,
+    @Body() driverDto: CreateDriverDto,
+    @UploadedFile() file: Express.Multer.File,
   ) {
+    if (file) {
+      driverDto.profile_image = file.filename;
+    }
     return this.authService.createDriver(user, driverDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('update-driver/:id')
+  @UseInterceptors(FileInterceptor('image', {
+    storage: diskStorage({
+      destination: './uploads',
+      filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
+        cb(null, `${uniqueSuffix}${extname(file.originalname)}`);
+      },
+    }),
+  }))
+  async updateDriver(
+    @GetUser() user: User,
+    @Param('id') id: number,
+    @Body() driverDto: CreateDriverDto, // Reuse or create specialized? Let's use it for simplicity.
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (file) {
+      driverDto.profile_image = file.filename;
+    }
+    return this.authService.updateDriver(user, id, driverDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('admin/update-user/:id')
+  async adminUpdateUser(
+    @GetUser() user: User,
+    @Param('id') targetId: number,
+    @Body() updateDto: UpdateUserAdminDto,
+  ) {
+    if (user.userType !== 'admin') throw new ForbiddenException('Only admins can perform this action');
+    return this.authService.adminUpdateUser(targetId, updateDto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('admin/delete-user/:id')
+  async adminDeleteUser(
+    @GetUser() user: User,
+    @Param('id') targetId: number,
+  ) {
+    if (user.userType !== 'admin') throw new ForbiddenException('Only admins can perform this action');
+    return this.authService.adminDeleteUser(targetId);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('admin/toggle-status/:id')
+  async adminToggleStatus(
+    @GetUser() user: User,
+    @Param('id') targetId: number,
+    @Body('status') status: 'active' | 'disabled',
+  ) {
+    if (user.userType !== 'admin') throw new ForbiddenException('Only admins can perform this action');
+    return this.authService.adminToggleStatus(targetId, status);
   }
 }

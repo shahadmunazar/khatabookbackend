@@ -6,6 +6,8 @@ import { LoginDto } from './dto/login.dto';
 import { VerifyEmailDto } from './dto/verify-email.dto';
 import { LoginOtpDto } from './dto/login-otp.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CreateDriverDto } from './dto/create-driver.dto';
+import { UpdateUserAdminDto } from './dto/update-user-admin.dto';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { Op } from 'sequelize';
@@ -91,6 +93,10 @@ export class AuthService {
       throw new UnauthorizedException('Please verify your email first');
     }
 
+    if (user.status === 'disabled') {
+      throw new UnauthorizedException('Your account has been disabled. Please contact support.');
+    }
+
     return this.generateTokenResponse(user);
   }
 
@@ -109,17 +115,22 @@ export class AuthService {
     };
   }
 
-  async createDriver(parentCompany: User, driverDto: RegisterDto) {
+  async createDriver(parentCompany: User, driverDto: CreateDriverDto) {
     if (parentCompany.userType !== 'company') {
       throw new ForbiddenException('Only companies can create drivers');
     }
-    driverDto.user_type = 'individual';
-    driverDto.company_id = parentCompany.id;
-    return this.register(driverDto, true); // Auto-verify drivers or not? Let's say false for security.
+
+    const registrationData: RegisterDto = {
+      ...driverDto,
+      user_type: 'individual',
+      company_id: parentCompany.id,
+    };
+
+    return this.register(registrationData, true);
   }
 
   async register(registerDto: RegisterDto, autoVerify = false) {
-    const { name, email, phone, password, user_type, company_id } = registerDto;
+    const { name, email, phone, password, user_type, company_id, profile_image } = registerDto;
 
     const existingUser = await this.userModel.findOne({ where: { email } });
     if (existingUser) throw new ConflictException('User with this email already exists');
@@ -147,6 +158,7 @@ export class AuthService {
         password: hashedPassword,
         userType: user_type,
         companyId: company_id,
+        profileImage: profile_image || null,
         otp: autoVerify ? null : otp,
         otpExpiry: autoVerify ? null : otpExpiry,
         verificationToken: autoVerify ? null : verificationToken,
@@ -276,5 +288,63 @@ export class AuthService {
       message: 'Profile updated successfully',
       user: userResponse
     };
+  }
+
+  async adminUpdateUser(id: number, updateDto: UpdateUserAdminDto) {
+    const user = await this.userModel.findByPk(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    if (updateDto.phone) {
+      const existing = await this.userModel.findOne({ where: { phone: updateDto.phone, id: { [Op.ne]: id } } });
+      if (existing) throw new ConflictException('Phone number already in use');
+    }
+
+    await user.update(updateDto);
+    return { message: 'User updated successfully', user };
+  }
+
+  async updateDriver(parentCompany: User, driverId: number, driverDto: CreateDriverDto) {
+    if (parentCompany.userType !== 'company') {
+      throw new ForbiddenException('Only companies can update drivers');
+    }
+
+    const driver = await this.userModel.findByPk(driverId);
+    if (!driver || driver.companyId !== parentCompany.id) {
+      throw new NotFoundException('Driver not found or does not belong to your company');
+    }
+
+    const { name, phone, password, profile_image } = driverDto;
+
+    if (phone && phone !== driver.phone) {
+      const existing = await this.userModel.findOne({ where: { phone, id: { [Op.ne]: driverId } } });
+      if (existing) throw new ConflictException('Phone number already in use');
+      driver.phone = phone;
+    }
+
+    if (name) driver.name = name;
+    if (profile_image) driver.profileImage = profile_image;
+    if (password) {
+      driver.password = await bcrypt.hash(password, 10);
+    }
+
+    await driver.save();
+    return { message: 'Driver updated successfully', driver };
+  }
+
+  async adminDeleteUser(id: number) {
+    const user = await this.userModel.findByPk(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    await user.destroy();
+    return { message: 'User deleted successfully' };
+  }
+
+  async adminToggleStatus(id: number, status: 'active' | 'disabled') {
+    const user = await this.userModel.findByPk(id);
+    if (!user) throw new NotFoundException('User not found');
+
+    user.status = status;
+    await user.save();
+    return { message: `User ${status} successfully`, status: user.status };
   }
 }
